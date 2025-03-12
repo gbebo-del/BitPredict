@@ -85,3 +85,47 @@
         (ok new-market-id)
     )
 )
+
+;; MARKET PARTICIPATION ENGINE
+
+;; Processes user market participation
+(define-public (take-position (market-id uint) (position (string-ascii 4)) (stake uint))
+    (let (
+        (market (unwrap! (map-get? markets market-id) err-not-found))
+        (current-block stacks-block-height)
+        )
+        ;; Market validity checks
+        (asserts! (and 
+                (>= current-block (get activation-block market)) 
+                (< current-block (get expiration-block market))) 
+                err-market-closed)
+        (asserts! (or (is-eq position "bull") (is-eq position "bear")) 
+                err-invalid-prediction)
+        (asserts! (>= stake (var-get minimum-stake)) 
+                err-invalid-parameter)
+
+        ;; Capital management
+        (asserts! (<= stake (stx-get-balance tx-sender)) 
+                err-insufficient-balance)
+        (try! (stx-transfer? stake tx-sender (as-contract tx-sender)))
+
+        ;; Position registration
+        (map-set positions 
+            {market: market-id, participant: tx-sender}
+            {direction: position, amount: stake, claimed: false}
+        )
+
+        ;; Market state update
+        (map-set markets market-id
+            (merge market {
+                bull-commitment: (if (is-eq position "bull")
+                                (+ (get bull-commitment market) stake)
+                                (get bull-commitment market)),
+                bear-commitment: (if (is-eq position "bear")
+                                (+ (get bear-commitment market) stake)
+                                (get bear-commitment market))
+            })
+        )
+        (ok true)
+    )
+)
