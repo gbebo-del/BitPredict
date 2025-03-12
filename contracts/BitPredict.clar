@@ -195,3 +195,37 @@
         )
     )
 )
+
+;; ADMINISTRATIVE CONTROLS
+
+(define-public (update-oracle (new-oracle principal))
+    (begin
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        ;; Add business logic validation
+        (asserts! (not (is-eq new-oracle contract-owner)) err-invalid-parameter) ;; Ensure oracle isn't the contract owner
+        (asserts! (not (is-eq new-oracle (as-contract tx-sender))) err-invalid-parameter) ;; Ensure oracle isn't the contract itself
+        (ok (var-set oracle-address new-oracle))
+    )
+)
+
+(define-public (adjust-stake (new-minimum uint))
+    (begin
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (asserts! (> new-minimum u0) err-invalid-parameter)
+        (ok (var-set minimum-stake new-minimum))
+    )
+)
+
+;; TRANSPARENCY INTERFACE
+
+(define-read-only (get-market-data (market-id uint))
+    (map-get? markets market-id)
+)
+
+(define-read-only (get-user-position (market-id uint) (user principal))
+    (map-get? positions {market: market-id, participant: user})
+)
+
+(define-read-only (get-treasury-balance)
+    (stx-get-balance (as-contract tx-sender))
+)
