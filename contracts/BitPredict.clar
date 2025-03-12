@@ -30,3 +30,58 @@
 (define-data-var minimum-stake uint u1000000)  ;; 1.0 STX base participation
 (define-data-var protocol-fee uint u2)         ;; 2% platform fee on winnings
 (define-data-var market-counter uint u0)       ;; Global market ID tracker
+
+;; PREDICTION MARKET CORE STRUCTURES
+
+;; Market lifecycle tracking
+(define-map markets
+    uint  ;; Market ID
+    { 
+        opening-price: uint,      ;; BTC/USD price at market start (sats)
+        closing-price: uint,      ;; BTC/USD price at resolution (sats)
+        bull-commitment: uint,    ;; Total "up" positions (STX)
+        bear-commitment: uint,    ;; Total "down" positions (STX)
+        activation-block: uint,   ;; Stacks block height for market start
+        expiration-block: uint,   ;; Stacks block height for market end
+        resolution-status: bool   ;; Market settlement flag
+    }
+)
+
+;; User position management
+(define-map positions
+    {market: uint, participant: principal}  ;; Composite key
+    {
+        direction: (string-ascii 4),  ;; "bull" or "bear"
+        amount: uint,                  ;; STX committed
+        claimed: bool                  ;; Reward status
+    }
+)
+
+;; MARKET LIFECYCLE MANAGEMENT
+
+;; Creates new prediction market window
+(define-public (create-market (opening-price uint) (activation-block uint) (expiration-block uint))
+    (let (
+        (new-market-id (var-get market-counter))
+        )
+        ;; Administrative controls
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (asserts! (> expiration-block activation-block) err-invalid-parameter)
+        (asserts! (> opening-price u0) err-invalid-parameter)
+        
+        ;; Market initialization
+        (map-set markets new-market-id
+            {
+                opening-price: opening-price,
+                closing-price: u0,
+                bull-commitment: u0,
+                bear-commitment: u0,
+                activation-block: activation-block,
+                expiration-block: expiration-block,
+                resolution-status: false
+            }
+        )
+        (var-set market-counter (+ new-market-id u1))
+        (ok new-market-id)
+    )
+)
