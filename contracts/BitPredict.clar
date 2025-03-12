@@ -129,3 +129,69 @@
         (ok true)
     )
 )
+
+;; MARKET RESOLUTION SYSTEM
+
+;; Finalizes market with oracle-reported price
+(define-public (settle-market (market-id uint) (closing-price uint))
+    (let (
+        (market (unwrap! (map-get? markets market-id) err-not-found))
+        )
+        ;; Authorization and timing checks
+        (asserts! (is-eq tx-sender (var-get oracle-address)) err-owner-only)
+        (asserts! (>= stacks-block-height (get expiration-block market)) err-market-closed)
+        (asserts! (not (get resolution-status market)) err-market-closed)
+        (asserts! (> closing-price u0) err-invalid-parameter)
+
+        ;; Market finalization
+        (map-set markets market-id
+            (merge market {
+                closing-price: closing-price,
+                resolution-status: true
+            })
+        )
+        (ok true)
+    )
+)
+
+;; REWARD DISTRIBUTION MECHANISM
+
+;; Processes reward claims for successful positions
+(define-public (claim-rewards (market-id uint))
+    (let (
+        (market (unwrap! (map-get? markets market-id) err-not-found))
+        (position (unwrap! (map-get? positions {market: market-id, participant: tx-sender}) err-not-found))
+        )
+        ;; Claim validity checks
+        (asserts! (get resolution-status market) err-market-closed)
+        (asserts! (not (get claimed position)) err-already-claimed)
+
+        (let (
+            (winning-side (if (> (get closing-price market) (get opening-price market)) "bull" "bear"))
+            (total-commitment (+ (get bull-commitment market) (get bear-commitment market)))
+            (winning-pool (if (is-eq winning-side "bull") 
+                            (get bull-commitment market) 
+                            (get bear-commitment market)))
+            )
+            ;; Position outcome verification
+            (asserts! (is-eq (get direction position) winning-side) err-invalid-prediction)
+            
+            (let (
+                (gross-reward (/ (* (get amount position) total-commitment) winning-pool))
+                (local-protocol-fee (/ (* gross-reward (var-get protocol-fee)) u100))
+                (net-payout (- gross-reward local-protocol-fee))
+                )
+                ;; Fund distribution
+                (try! (as-contract (stx-transfer? net-payout (as-contract tx-sender) tx-sender)))
+                (try! (as-contract (stx-transfer? local-protocol-fee (as-contract tx-sender) contract-owner)))
+                
+                ;; Position state update
+                (map-set positions 
+                    {market: market-id, participant: tx-sender}
+                    (merge position {claimed: true})
+                )
+                (ok net-payout)
+            )
+        )
+    )
+)
